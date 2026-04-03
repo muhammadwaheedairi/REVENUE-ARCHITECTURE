@@ -1,337 +1,104 @@
-# REVENUE-ARCHITECTURE.md
-## Digital FTE Framework — Claw Kingdom Signal-to-Revenue System
-### Built by: WaheedAI Solutions | Muhammad Waheed (Lead Engineer)
+# Digital FTE — Claw Kingdom Signal-to-Revenue Architecture
+**By:** Muhammad Waheed — WaheedAI Solutions
 
 ---
 
-## EXECUTIVE SUMMARY
-
-Most AI builds capture a signal and update a database field. That's not revenue.
-
-Revenue happens when a signal triggers **ownership**, **a follow-up sequence**, and a
-**feedback loop** — all within milliseconds. This document proves our Digital FTE
-framework closes the four gaps Claw Kingdom identified.
+> *"Revenue still stalls if follow-up logic isn't tied to commercial outcomes — not just stages updating."*
+> — Baljinder Lally, RevLab Intelligence
 
 ---
 
-## THE FOUR GAPS WE SOLVE
+## The Problem You Described
+
+Most builds get the routing right. But revenue still stalls. Why?
 
 ```
-Client Said:                          Our System Does:
-─────────────────────────────────     ──────────────────────────────────────
-"Signal layer = commercial value"  →  Every QR scan = structured Kafka event
-"Context→Action gap kills builds"  →  pgvector context decides action in <50ms
-"Follow-up must tie to outcomes"   →  Agent SDK triggers ownership + sequence
-"Need pipeline movement + owner"   →  Postgres stage + Kafka ownership notify
+❌ What most builds do:
+   Signal → Stage Update → Done
+   (Technically clean. Commercially blind.)
+
+✅ What we do:
+   Signal → Stage Entry → Instant Ownership → Follow-up → Revenue Visibility
 ```
 
 ---
 
-## SECTION 1 — SIGNAL-TO-REVENUE MAPPING
+## How We Close All 4 Gaps
 
-### How a Raw QR Scan Becomes a Commercial Event
+```mermaid
+graph TB
+    A[QR Journey Signal] --> B[Stage Entry\nAuto-assigned in Postgres]
+    B --> C[Instant Ownership\nRight person or agent — immediately]
+    C --> D[Follow-up Sequence\nTied to commercial outcome\nnot just stage update]
+    D --> E[Feedback into Visibility\nEvery action logged real-time]
+    E --> F[Revenue Moves\nNot just tickets]
 
-A physical QR scan at a Claw Machine is blind by default. Our ingestion layer
-makes it commercially visible in 3 steps:
-
-```
-PHYSICAL WORLD                    DIGITAL SIGNAL LAYER
-──────────────                    ────────────────────
-
-  [Claw Machine]                  FastAPI Webhook Endpoint
-  QR Scan Event       ──────────► POST /api/v1/signal/ingest
-                                         │
-                                         ▼
-                               Kafka Topic: fte.signals.raw
-                               Payload:
-                               {
-                                 signal_id: "uuid",
-                                 source: "qr_scan",
-                                 machine_id: "CLW-042",
-                                 customer_id: "inferred or null",
-                                 timestamp: "ISO-8601",
-                                 location: "floor_zone_B",
-                                 metadata: { attempts: 3, session_ms: 45000 }
-                               }
-                                         │
-                                         ▼
-                            Signal Enrichment Consumer
-                            (Postgres lookup: known customer?)
-                                         │
-                               ┌─────────┴──────────┐
-                               ▼                    ▼
-                           KNOWN               UNKNOWN
-                        [VIP / History]     [New Lead Signal]
-                               │                    │
-                               ▼                    ▼
-                    Kafka: fte.signals.enriched  (both paths merge here)
-                    {
-                      ...original,
-                      commercial_intent: "HIGH / MEDIUM / NEW",
-                      lead_stage: "HOT / WARM / COLD / NEW",
-                      recommended_action: "DIRECT_SALES / NURTURE / DISCOUNT_TRIGGER"
-                    }
-```
-
-**Every scan is now a Commercial Event — not just a log entry.**
-
----
-
-## SECTION 2 — THE MISSING LINK: CONTEXT-TO-ACTION
-
-### The Gap Most Builds Fall Into
-
-```
-TYPICAL BUILD (broken):
-  Signal ──► CRM Stage Update ──► Nothing else happens
-                                  (no owner, no follow-up, revenue stalls)
-
-OUR BUILD (closed loop):
-  Signal ──► Context Layer ──► Action Layer ──► Owner Assigned + Follow-up Live
-```
-
-### How We Decide "Who Owns This Lead" and "What Follow-Up Fires"
-
-```
-CONTEXT LAYER — PostgreSQL + pgvector
-──────────────────────────────────────
-
-  customers table:
-    - visit_count, last_visit, total_spend
-    - failed_attempts (frustration score)
-    - preferred_channel (WhatsApp / Email / Web)
-
-  pgvector semantic search:
-    - "Find customers similar to this behavior pattern"
-    - Returns: intent_score, churn_risk, upsell_probability
-
-  Decision Matrix:
-  ┌────────────────────┬───────────────────┬──────────────────────────┐
-  │ Context Signal     │ Intent Tag        │ Action Triggered         │
-  ├────────────────────┼───────────────────┼──────────────────────────┤
-  │ 3+ failed attempts │ FRUSTRATED_HOT    │ Instant discount WhatsApp│
-  │ VIP + 7 day gap    │ RETENTION_RISK    │ Manager alert + callback │
-  │ First scan ever    │ NEW_LEAD          │ Welcome + nurture seq.   │
-  │ High spend history │ UPSELL_READY      │ Direct Sales bot assign  │
-  │ Scan + no purchase │ ABANDONED         │ 30-min follow-up trigger │
-  └────────────────────┴───────────────────┴──────────────────────────┘
-
-
-ACTION LAYER — OpenAI Agents SDK (This Is The Ownership Layer)
-───────────────────────────────────────────────────────────────
-
-  Agent receives enriched signal from Kafka.
-  Agent does NOT just update a field.
-  Agent executes:
-
-    Step 1: Assign Lead Owner
-    ─────────────────────────
-    if intent == "FRUSTRATED_HOT" or "UPSELL_READY":
-        → assign_to: floor_staff_agent (human escalation)
-        → Kafka publish: fte.ownership.assigned
-        → Staff gets WhatsApp ping in <5 seconds
-
-    if intent == "NEW_LEAD" or "ABANDONED":
-        → assign_to: sales_sub_agent (automated)
-        → Sub-agent begins follow-up sequence autonomously
-
-    Step 2: Trigger Follow-Up Sequence
-    ────────────────────────────────────
-    Channel selected from customer preference (WhatsApp / Gmail / Web)
-    Sequence type from intent tag:
-      - DISCOUNT  → immediate one-time offer message
-      - NURTURE   → 3-message drip over 48 hours
-      - CALLBACK  → manager notified + calendar slot sent
-      - RETENTION → personalized win-back flow
-
-    Step 3: Log Ownership Event
-    ────────────────────────────
-    Postgres INSERT into pipeline_events:
-    {
-      signal_id, customer_id, intent_tag,
-      owner_assigned, follow_up_type,
-      timestamp, channel_used
-    }
-```
-
-**This is the "Missing Link." The Context Layer reads history.
-The Action Layer creates accountability. No lead goes unowned.**
-
----
-
-## SECTION 3 — PIPELINE OWNERSHIP LOGIC
-
-### Stage Entry
-
-```
-NEW LEAD (first scan, no history):
-  lead_stage = "NEW"
-  owner = "nurture_bot"
-  sequence = "onboarding_3_step"
-  visibility = "new_leads dashboard"
-
-HOT LEAD (3+ visits, no conversion):
-  lead_stage = "HOT"
-  owner = floor_staff OR sales_bot (intent-based)
-  sequence = "high_intent_close"
-  visibility = "priority_pipeline dashboard"
-  SLA = 15 minutes (escalates if no action)
-
-VIP AT RISK (high spend + long gap):
-  lead_stage = "RETENTION"
-  owner = "senior_manager_agent"
-  sequence = "win_back_personal"
-  visibility = "retention_alerts dashboard"
-  SLA = 5 minutes
-```
-
-### Instant Ownership Flow
-
-```
-Signal Enriched
-      │
-      ▼
-  OpenAI Agent evaluates intent
-      │
-      ├──► Human Escalation Path:
-      │    Kafka: fte.ownership.human
-      │    → Floor staff WhatsApp ping
-      │    → Dashboard highlights lead RED
-      │    → 15-min SLA timer starts
-      │
-      └──► Bot Ownership Path:
-           Kafka: fte.ownership.bot
-           → Sub-agent begins sequence
-           → Dashboard highlights lead YELLOW
-           → Auto-resolves or escalates after sequence
-```
-
-### Feedback Loops — Revenue Visibility for Management
-
-```
-Every action updates Postgres pipeline_events in real-time:
-
-  Event Types logged:
-  ─────────────────────────────────────────────────────────
-  SIGNAL_RECEIVED     → raw scan captured
-  INTENT_TAGGED       → context layer classified
-  OWNER_ASSIGNED      → human or bot assigned
-  SEQUENCE_STARTED    → follow-up initiated
-  SEQUENCE_RESPONDED  → customer replied or clicked
-  STAGE_ADVANCED      → lead moved HOT→CLOSED or churned
-  REVENUE_LOGGED      → purchase confirmed
-  ─────────────────────────────────────────────────────────
-
-Management Dashboard (Next.js):
-  - Live pipeline view: NEW / HOT / RETENTION / CLOSED
-  - Per-machine revenue attribution
-  - Owner performance (bot vs human close rate)
-  - Sequence effectiveness (which triggers convert best)
-  - Daily/weekly revenue impact per signal source
+    style A fill:#185FA5,color:#fff,stroke:#0C447C
+    style F fill:#1D9E75,color:#fff,stroke:#0F6E56
+    style D fill:#534AB7,color:#fff,stroke:#3C3489
 ```
 
 ---
 
-## SECTION 4 — INFRASTRUCTURE FOR SCALE
+## The 3-Layer Architecture
 
-### Why AWS EKS + Kafka = 100% Reliability at Scale
+```mermaid
+graph TB
+    A[QR Journey Signal] --> B[Ingestion Layer\nReal-time signal capture via Kafka]
+    B --> C[Context Layer\nPostgreSQL — intent + history\nbefore action fires]
+    C --> D[Action Layer\nThis is where your 4 gaps get closed]
 
-```
-CLAW KINGDOM SCALE CHALLENGE:
-  Hundreds of physical machines
-  Peak hours: simultaneous scan bursts
-  Zero tolerance for dropped signals
+    D --> E[Stage Entry\nauto-assigned]
+    D --> F[Instant Ownership\nhuman or sub-agent]
+    D --> G[Follow-up Sequence\ncommercial outcome tied]
+    D --> H[Feedback Loop\nvisibility updated]
 
-OUR INFRASTRUCTURE ANSWER:
-
-  ┌─────────────────────────────────────────────────────────┐
-  │                    AWS EKS CLUSTER                       │
-  │                                                          │
-  │  ┌──────────────┐   ┌──────────────┐  ┌──────────────┐  │
-  │  │  FastAPI Pods │   │  Agent Pods  │  │ Next.js Pods │  │
-  │  │  (ingestion) │   │  (OpenAI SDK)│  │  (dashboard) │  │
-  │  │  replicas: 3 │   │  replicas: 5 │  │  replicas: 2 │  │
-  │  └──────┬───────┘   └──────┬───────┘  └──────────────┘  │
-  │         │                  │                              │
-  │         ▼                  ▼                              │
-  │  ┌─────────────────────────────────────┐                 │
-  │  │         Apache Kafka (3.7.0)         │                 │
-  │  │  Topics:                             │                 │
-  │  │  fte.signals.raw                     │                 │
-  │  │  fte.signals.enriched                │                 │
-  │  │  fte.ownership.assigned              │                 │
-  │  │  fte.sequences.triggered             │                 │
-  │  │  fte.pipeline.events                 │                 │
-  │  │  Partitions: 12 | Replication: 3    │                 │
-  │  └─────────────────────┬───────────────┘                 │
-  │                        │                                  │
-  │                        ▼                                  │
-  │  ┌─────────────────────────────────────┐                 │
-  │  │   PostgreSQL + pgvector (Neon.tech)  │                 │
-  │  │   - customers, leads, pipeline_events│                 │
-  │  │   - vector embeddings for intent     │                 │
-  │  │   - connection pooling: pgBouncer    │                 │
-  │  └─────────────────────────────────────┘                 │
-  └─────────────────────────────────────────────────────────┘
-
-RELIABILITY GUARANTEES:
-  ✓ Kafka partitions = parallel processing (no queue bottleneck)
-  ✓ EKS auto-scaling = burst scan handling during peak hours
-  ✓ Replication factor 3 = zero message loss even if 2 brokers fail
-  ✓ Neon.tech serverless Postgres = auto-scale, no cold starts
-  ✓ Dead Letter Queue on every Kafka topic = failed events retried
+    style D fill:#534AB7,color:#fff,stroke:#3C3489
+    style C fill:#185FA5,color:#fff,stroke:#0C447C
+    style B fill:#BA7517,color:#fff,stroke:#854F0B
 ```
 
 ---
 
-## SECTION 5 — REVENUE IMPACT TABLE
+## Your 4 Gaps — Closed
 
-```
-┌──────────────────────┬───────────────────────────────────┬─────────────────────────────────────┐
-│ SIGNAL               │ COMMERCIAL LOGIC                  │ REVENUE OUTCOME                     │
-├──────────────────────┼───────────────────────────────────┼─────────────────────────────────────┤
-│ QR Scan — 1st time   │ New lead created, nurture starts  │ Brand awareness → 2nd visit likely  │
-│                      │ Welcome message via WhatsApp       │ +15-25% return rate (avg)           │
-├──────────────────────┼───────────────────────────────────┼─────────────────────────────────────┤
-│ QR Scan — 3 failed   │ FRUSTRATED_HOT intent triggered   │ Instant discount prevents churn     │
-│ attempts             │ Discount offer sent in <5 sec     │ Converts frustration → purchase     │
-├──────────────────────┼───────────────────────────────────┼─────────────────────────────────────┤
-│ VIP — 7+ day gap     │ RETENTION_RISK flagged            │ Win-back campaign before they leave │
-│                      │ Manager alert + personal offer    │ Retaining VIP = 5-10x new lead $    │
-├──────────────────────┼───────────────────────────────────┼─────────────────────────────────────┤
-│ Scan + no purchase   │ ABANDONED — 30-min follow-up      │ Re-engagement while intent is hot   │
-│ (session drop-off)   │ Personalized incentive sent       │ +30% recovery rate on warm leads    │
-├──────────────────────┼───────────────────────────────────┼─────────────────────────────────────┤
-│ High spend history   │ UPSELL_READY → direct sales bot  │ Premium package / loyalty offer     │
-│                      │ assigned immediately               │ Higher AOV per visit                │
-├──────────────────────┼───────────────────────────────────┼─────────────────────────────────────┤
-│ Staff assigned lead  │ Human SLA: 15 min response        │ Personal touch on high-value leads  │
-│ (human escalation)   │ Dashboard RED alert until done    │ Accountability = no lead left cold  │
-├──────────────────────┼───────────────────────────────────┼─────────────────────────────────────┤
-│ Sequence completed   │ Feedback logged to Postgres       │ Management sees what converts       │
-│ (all types)          │ A/B data on best-performing flows │ Continuous revenue optimization     │
-└──────────────────────┴───────────────────────────────────┴─────────────────────────────────────┘
+| Your Exact Concern | How We Handle It |
+|---|---|
+| Stage Entry | Signal auto-assigns lead stage in Postgres instantly |
+| Instant Ownership | Kafka event fires — right person or agent owns it immediately |
+| Follow-up tied to commercial outcomes | Action Layer triggers revenue-focused sequence — not just a status update |
+| Feedback into visibility | Every action logged real-time — management sees what's moving |
+
+---
+
+## Signal → Commercial Outcome
+
+| Signal | Commercial Logic | Outcome |
+|---|---|---|
+| QR scan — first time | New lead, stage auto-assigned, sequence starts | Pipeline entry — not just a log |
+| 3+ failed attempts | Frustration detected, ownership triggered instantly | Churn prevented |
+| High intent, no conversion | Abandoned — follow-up tied to offer, not just reminder | Revenue recovered |
+| VIP signal — long gap | Retention risk flagged, senior ownership assigned | VIP protected |
+
+---
+
+## Infrastructure That Supports It
+
+```mermaid
+graph TB
+    subgraph EKS["AWS EKS — Always On"]
+        A[Ingestion Pods] --> B[Apache Kafka\nZero signal loss]
+        B --> C[Agent Pods\nOpenAI Agents SDK]
+        C --> D[PostgreSQL\nStage + Ownership + Logs]
+        D --> E[Next.js Dashboard\nLive visibility]
+    end
 ```
 
 ---
 
-## CLOSING STATEMENT
+> *"The agent is just the engine. The real value is in Signals → Pipeline mapping."*
 
-> "Most builds stop at the signal. Ours starts there."
-
-The Digital FTE framework treats every QR scan as a revenue event with
-an owner, a sequence, and a feedback loop. Claw Kingdom's pipeline will
-not just capture leads — it will move them, own them, and close them.
-
-**Stack Summary:**
-- Ingestion: FastAPI + Kafka (Apache 3.7.0)
-- Context: PostgreSQL + pgvector (Neon.tech)
-- Action: OpenAI Agents SDK (multi-channel routing)
-- Channels: WhatsApp (Twilio) + Gmail + Web Form
-- Infrastructure: AWS EKS + Kubernetes
-- Dashboard: Next.js 16
+**Stack:** FastAPI · Kafka · PostgreSQL · OpenAI Agents SDK · Next.js 16 · AWS EKS
 
 ---
-*Document prepared by Muhammad Waheed — WaheedAI Solutions*
-*Contact: muhammadwaheedairi@gmail.com*
-*GitHub: muhammadwaheedairi*
+*Muhammad Waheed — WaheedAI Solutions · muhammadwaheedairi@gmail.com*
